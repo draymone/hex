@@ -1,3 +1,8 @@
+let n = 9 (* hardcode pour des raisons de performance *)
+
+let infinity = 9999999
+
+
 (* TYPES ---------------------------------------------------------------------------------------------------------------------------------------------- *)
 type case = V | B | R
 
@@ -18,7 +23,8 @@ type graphe = {
 type arbre_config = {
         config : configuration;
         coup : coup option;          (* None pour la racine *)
-        enfants : arbre_config list
+        enfants : arbre_config list;
+        valeur: int
 }
 
 (* PETITES FONCTIONS ---------------------------------------------------------------------------------------------------------------------------------- *)
@@ -29,12 +35,10 @@ let joueur_oppose = function
         | V -> failwith "[ERREUR] Joueur vide"
 
 let print_config config =
-        let n = Array.length config.plateau in
-
         let case_to_str = function
                 | V -> "."
-                | B -> "X"
-                | R -> "O"
+                | B -> "B"
+                | R -> "r"
         in
 
         Printf.printf "     ";
@@ -61,7 +65,6 @@ let print_config config =
 
 (* copie d'une matrice *)
 let copie t = 
-	let n =	Array.length t in
 	let t2 = Array.make_matrix n n V in
 	for i = 0 to n-1 do
 		for j = 0 to n-1 do
@@ -71,7 +74,6 @@ let copie t =
 	t2
 
 let transpose t = 
-	let n =  Array.length t in
 	let t2 = Array.make_matrix n n V in
 	for i = 0 to n-1 do
 		for j = 0 to n-1 do
@@ -81,7 +83,6 @@ let transpose t =
 	t2
 
 let plus_court_chemin g depart arrivee =
-	let n = g.n in
 	let inf = n*n+1 in
 
 	let dist = Array.make_matrix n n inf in
@@ -147,70 +148,80 @@ let plus_court_chemin g depart arrivee =
 (* SUJET ---------------------------------------------------------------------------------------------------------------------------------------------- *)
 
 (* Q1 *)
-let dans_plateau (c:configuration) = let n = Array.length c.plateau in
-        fun ((x,y):sommet) -> 0<=x && x < n && y>=0 && y < n
+let dans_plateau ((x,y):sommet) =
+        0<=x && x < n && y>=0 && y < n
 (* Q2 *)
-let cout j (c: case) : int =
-        if c = V then 1 else if c = j then 0 else 2
+(* le poids dans le graphe du joueur j de l'arete entre les cases c1 et c2 *)
+let cout j (c1: case) (c2: case) =
+        let j' = joueur_oppose j in
+        if c1=j' || c2=j' then 2
+        else if c1=j && c2=j then 0
+        else 1
 
 (* Q3 *)
 let liste_voisins (conf:configuration) j ((x,y):sommet) : (sommet*int) list =
 	[(x,y-1); (x,y+1); (x-1,y); (x-1,y+1); (x+1,y-1); (x+1,y)]
-	|> List.filter (dans_plateau conf)
+	|> List.filter (dans_plateau)
 	|> List.map begin
-                let couleur =  conf.plateau.(x).(y) in (* couleur de la case (x,y) *)
-                (fun (x',y') -> (
-                        (x',y'),
-                        max (cout j conf.plateau.(x).(y)) (cout j couleur) (* assure que les poids soient les memes dans les 2 sens *)
-                ) )
+                let plateau = conf.plateau in
+                let couleur = plateau.(x).(y) in (* couleur de la case (x,y) *)
+                (fun (x,y) -> (
+                        (x,y),
+                        cout j plateau.(x).(y) couleur
+                        )
+                )
         end
 	|> List.filter (fun (_,cout) -> cout <> 2)
 
 (* Q4 *)
 let construire_graphe config joueur =
-	let n = Array.length config.plateau in
 	{
 		n = n ;
 		voisins = liste_voisins config joueur
 	}
 
+
+
 (* renvoie la longueur du plus court chemin entre les rives *)
-let victoire_aux j config =
-	let n = Array.length config.plateau in
-        let j' = joueur_oppose j in
+let victoire_aux =
+        (* precalcule pour des raisons de performance *)
+        let rive1B = List.init n (fun x -> (x,0)) in
+        let rive1R = List.init n (fun x -> (0,x)) in
 
-	let rive1 = List.init n 
-                (if j = B
-		then (fun x -> (x,0))
-		else (fun x -> (0,x)))
-	in
+        let rive2B = List.init n (fun x -> (x,n-1)) in
+        let rive2R = List.init n (fun x -> (n-1,x)) in
 
-	let rive2 = List.init n 
-                (if j = B
-		then (fun x -> (x,n-1))
-		else (fun x -> (n-1,x)))
-	in
+        fun j ->
+        let rive1,rive2,j' =
+                if j=B
+                then rive1B,rive2B,R
+                else rive1R,rive2R,B
+        in
 
+        fun config -> 
 	let rive1 = List.filter (fun (x,y) -> config.plateau.(x).(y) <> j') rive1 in
 	let rive2 = List.filter (fun (x,y) -> config.plateau.(x).(y) <> j') rive2 in
 	let graphe = construire_graphe config j in
 	plus_court_chemin graphe rive1 rive2
 
-let victoire j config = victoire_aux j config = 0
 
-let victoire_bleu = victoire B
-let victoire_rouge = victoire R
+let victoire_aux_B = victoire_aux B
+let victoire_aux_R = victoire_aux R
+
+let victoire_B config = victoire_aux_B config = 0
+let victoire_R config = victoire_aux_R config = 0
 
 (* Q5 *)
-let coups_possibles config =
-	if victoire_rouge config || victoire_bleu config then [] else
+let coups_possibles  =
+        (* precalcule pour des raisons de performance *)
+        let cases = List.init n (fun x -> List.init n (fun y -> (x,y))) |> List.concat in
 
-	let n = Array.length config.plateau in
+        fun config -> 
+	if victoire_R config || victoire_B config then [] else
+
 	let j = config.joueur in
-
-	List.init n (fun x -> List.init n (fun y -> (x,y)))
-	|> List.concat
-	|> List.filter (fun (x,y) -> config.plateau.(x).(y) = V)
+	cases
+        |> List.filter (fun (x,y) -> config.plateau.(x).(y) = V)
 	|> List.map (fun (x,y) -> 
 		let config = {
 			joueur = joueur_oppose j;
@@ -219,39 +230,6 @@ let coups_possibles config =
 		config.plateau.(x).(y) <- j;
 		(config, (x,y))
 	)
-
-(* Q6 *)
-
-(* prend en entree un coup et lui associe un interet: 0 si le coup est interessant (plus c'est est petit, moins le coup est interessan) *)
-let interet (config: configuration) (c: coup) : int =
-	let n = Array.length config.plateau in
-
-        if c = (n/2,n/2) then 0 else (* prendre le centre *)
-
-        (* on regarde si la distance minimale a une case deja remplie est inferieure ou egale a 2*)
-
-        let (x,y) = c in
-        
-        (* liste des cases à 2 d'ecart *)
-        let r = [(1, 1); (2, 0); (2, -1); (2, -2); (1, 0); (1, -1); (1, -2); (0, 2); 
-         (0, 1); (0, -1); (0, -2); (-1, 2); (-1, 1); (-1, 0); (-1, -1); (-2, 2);
-         (-2, 1); (-2, 0)] (* TODO: optimiser l'ordre *)
-	|> List.exists (fun (dx,dy) -> let x = x+dx in let y = y + dy in dans_plateau config (x,y) && config.plateau.(x).(y) <> V)
-        in if r then 0 else -2
-
-let rec construire_arbre config h =
-	if h <= 0 then {config=config; coup=None; enfants=[]}
-	else
-
-	let enfants = coups_possibles config in
-	let enfants = List.map
-		(fun (config, coup) -> 
-			let {config;enfants} = construire_arbre config (h-1 + interet config coup) in
-			{config=config;enfants=enfants; coup=Some coup}
-		)
-		enfants in
-	
-	{config=config; coup=None; enfants=enfants}
 
 (* Q7 *)
 let heuristique config = 
@@ -265,21 +243,56 @@ let heuristique config =
 
         l*l - l'*l'
 
-(* Q8 *)
-let rec valeur arbre =
-	if arbre.enfants = [] then heuristique arbre.config else
+(* Q6 *)
+
+(* prend en entree un coup et lui associe un interet: 0 si le coup est interessant, un entier strictement negatif sinon *)
+(* TODO: prebake avec la config en entree et def la liste des coups interessants *)
+let interet (config: configuration) =
+        let plateau = config.plateau in
+
+        fun (c: coup) ->
+        if c = (n/2,n/2) then 0 else (* prendre le centre *)
+
+        (* on regarde si la distance minimale a une case deja remplie est inferieure ou egale a 2*)
+        let (x,y) = c in
+        
+        (* liste des cases à 2 d'ecart *)
+        [(1, 1); (2, 0); (2, -1); (2, -2); (1, 0); (1, -1); (1, -2); (0, 2); 
+         (0, 1); (0, -1); (0, -2); (-1, 2); (-1, 1); (-1, 0); (-1, -1); (-2, 2);
+         (-2, 1); (-2, 0)] (* TODO: optimiser l'ordre *)
+	|> List.exists (fun (dx,dy) -> let x, y = x+dx, y + dy in dans_plateau (x,y) && plateau.(x).(y) <> V)
+        |> function | true -> 0 | false -> -2
+
+let rec construire_arbre config h coup =
+        if h <= 0 then {config=config; coup=coup; enfants=[]; valeur = heuristique config }
+	else
+
+        let valeur,comp =
+                if config.joueur = B
+                then ref (-infinity), (>)
+                else ref (+infinity), (<)
+        in
+
+	let enfants = coups_possibles config in
+
+
+	let enfants = List.map
+		(fun (config, coup) -> 
+                        let res = construire_arbre config (h-1 + interet config coup) (Some coup) in
+                        let () = if comp res.valeur !valeur then valeur := res.valeur in
+                        res
+
+		)
+		enfants in
 	
-	let valeurs_enfants = List.map valeur arbre.enfants in
-	let acc,choix =
-		if arbre.config.joueur = B
-		then -9999999, max
-		else +9999999, min in
-	List.fold_left choix acc valeurs_enfants
+        {config=config; coup=coup; enfants=enfants; valeur=(!valeur)}
+
 
 (* Q9 *)
 let rec trouver_coup arbre =
         let enfants = arbre.enfants |> List.map
-                (fun arbre -> let {coup}=arbre in match coup with | None -> failwith "[ERREUR] aaaa pas de coup" | Some coup -> (coup, valeur arbre)) in
+                (fun arbre -> let {coup;valeur}=arbre in match coup with | None -> failwith "[ERREUR] aaaa pas de coup" | Some coup -> (coup, valeur))
+        in
         let c,_ = List.fold_left
                 (fun (c,v) (c',v') -> if v>=v' then (c,v) else (c',v'))
                 ( (-1,-1), -9999999)
@@ -289,7 +302,7 @@ let rec trouver_coup arbre =
 
 (* Q10 *)
 let minmax (config: configuration) (h: int) =
-        trouver_coup (construire_arbre config h)
+        trouver_coup (construire_arbre config h None)
 
 (* Q99 *)
 let choisir_coup config = minmax config 1
@@ -323,9 +336,9 @@ let jouer_coup config joueur (i,j) =
 let rec jeu config =
 	print_config config;
 
-	if victoire_rouge config then
+	if victoire_R config then
 		Printf.printf "Vous (R) avez gagné !\n"
-	else if victoire_bleu config then
+	else if victoire_B config then
 		Printf.printf "L'IA (B) a gagné !\n"
 	else if config.joueur = R then begin
 		(* Tour humain *)
@@ -354,7 +367,7 @@ let () =
 
 (* EXEMPLES ------------------------------------------------------------------------------------------------------------------------------------------- *)
 let ec1 =
-        let n = 11 in
+        let n = 9 in
         let p = Array.make_matrix n n V in
 
         p.(0).(2) <- B;
@@ -371,16 +384,13 @@ let ec1 =
         p.(7).(2) <- R;
         p.(7).(3) <- R;
         p.(8).(2) <- R;
-        p.(9).(2) <- R;
-        p.(9).(3) <- R;
-        p.(10).(2) <- R;
         {
                 plateau = p;
                 joueur = R;
         }
 
 let ec2 =
-        let p = Array.make_matrix 11 11 V in 
+        let p = Array.make_matrix 9 9 V in 
         {
                 plateau = p;
                 joueur = R;
