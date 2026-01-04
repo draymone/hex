@@ -1,4 +1,6 @@
-let n = 9 (* hardcode pour des raisons de performance *)
+let n = 11 (* hardcode pour des raisons de performance *)
+
+let () = if n<4 then failwith "[ERREUR] Il faut n >= 4"
 
 let infinity = 9999999
 
@@ -18,6 +20,7 @@ type sommet = int * int
 type graphe = {
         n : int;
         voisins : sommet -> (sommet * int) list;
+        (* il y a aussi les pseudo-sommets (n,0) et (n,1) pour les rives B, idem (n,2) et (n,3) pour R *)
 }
 
 type arbre_config = {
@@ -82,14 +85,10 @@ let transpose t =
 	done;
 	t2
 
-let plus_court_chemin g depart arrivee =
+let plus_court_chemin g (depart: sommet list) (arrivee: sommet list) =
 	let inf = n*n+1 in
 
-	let dist = Array.make_matrix n n inf in
-
-	let est_arrivee s =
-		List.exists (fun s' -> s = s') arrivee
-	in
+	let dist = Array.make_matrix (n+1) n inf in
 
 	let avant = ref [] in
 	let arriere = ref [] in
@@ -126,7 +125,7 @@ let plus_court_chemin g depart arrivee =
 		| None -> ()
 		| Some (x, y) ->
 				let d = dist.(x).(y) in
-				List.iter (fun ((i, j), w) ->
+                                List.iter (fun ((i, j), w) ->
 					let nd = d + w in
 					if nd < dist.(i).(j) then (
 						dist.(i).(j) <- nd;
@@ -152,58 +151,78 @@ let dans_plateau ((x,y):sommet) =
         0<=x && x < n && y>=0 && y < n
 (* Q2 *)
 (* le poids dans le graphe du joueur j de l'arete entre les cases c1 et c2 *)
-let cout j (c1: case) (c2: case) =
-        let j' = joueur_oppose j in
-        if c1=j' || c2=j' then 2
-        else if c1=j && c2=j then 0
-        else 1
+let cout j (c: case) =
+        if c=j then 0
+        else if c=V then 1
+        else 2
 
 (* Q3 *)
-let liste_voisins (conf:configuration) j ((x,y):sommet) : (sommet*int) list =
+let liste_voisins j plateau ((x,y):sommet) : (sommet*int) list =
 	[(x,y-1); (x,y+1); (x-1,y); (x-1,y+1); (x+1,y-1); (x+1,y)]
-	|> List.filter (dans_plateau)
+	|> List.filter dans_plateau
 	|> List.map begin
-                let plateau = conf.plateau in
-                let couleur = plateau.(x).(y) in (* couleur de la case (x,y) *)
                 (fun (x,y) -> (
                         (x,y),
-                        cout j plateau.(x).(y) couleur
+                        cout j plateau.(x).(y)
                         )
                 )
         end
 	|> List.filter (fun (_,cout) -> cout <> 2)
 
+(* ajoute les pseudo-sommets a la liste des voisins *)
+let liste_voisins j plateau =
+        if j=B
+        then
+                let v1 = List.init n (fun x -> ( (x,0),   cout B plateau.(x).(0)   ) ) |> List.filter (fun (_,cout) -> cout <> 2) in
+                let v2 = List.init n (fun x -> ( (x,n-1), cout B plateau.(x).(n-1) ) ) |> List.filter (fun (_,cout) -> cout <> 2) in
+
+                fun ((x,y): sommet) -> begin
+                        if (x,y)=(n,0) then v1
+                        else if (x,y)=(n,1) then v2
+                        else
+                        (
+                                let c = plateau.(x).(y) in
+                                if c = R then      []
+                                else if y=0 then   [(n,0), 0]
+                                else if y=n-1 then [(n,1), 0]
+                                else               []
+                        ) @ liste_voisins j plateau (x,y)
+                end
+        else
+                let v1 = List.init n (fun x -> ( (0,x),   cout R plateau.(0).(x)   ) ) |> List.filter (fun (_,cout) -> cout <> 2) in
+                let v2 = List.init n (fun x -> ( (n-1,x), cout R plateau.(n-1).(x) ) ) |> List.filter (fun (_,cout) -> cout <> 2) in
+
+                fun ((x,y): sommet) -> begin
+                        if (x,y)=(n,2) then v1
+                        else if (x,y)=(n,3) then v2
+                        else
+                        (
+                                let c = plateau.(x).(y) in
+                                if c = B then      []
+                                else if x=0 then   [(n,2), 0]
+                                else if x=n-1 then [(n,3), 0]
+                                else               []
+                        ) @ liste_voisins j plateau (x,y)
+                end
+
 (* Q4 *)
 let construire_graphe config joueur =
 	{
 		n = n ;
-		voisins = liste_voisins config joueur
+		voisins = liste_voisins joueur config
 	}
 
-
-
 (* renvoie la longueur du plus court chemin entre les rives *)
-let victoire_aux =
-        (* precalcule pour des raisons de performance *)
-        let rive1B = List.init n (fun x -> (x,0)) in
-        let rive1R = List.init n (fun x -> (0,x)) in
-
-        let rive2B = List.init n (fun x -> (x,n-1)) in
-        let rive2R = List.init n (fun x -> (n-1,x)) in
-
-        fun j ->
+let victoire_aux j =
         let rive1,rive2,j' =
                 if j=B
-                then rive1B,rive2B,R
-                else rive1R,rive2R,B
+                then [(n,0)],[(n,1)],R
+                else [(n,2)],[(n,3)],B
         in
 
-        fun config -> 
-	let rive1 = List.filter (fun (x,y) -> config.plateau.(x).(y) <> j') rive1 in
-	let rive2 = List.filter (fun (x,y) -> config.plateau.(x).(y) <> j') rive2 in
-	let graphe = construire_graphe config j in
+        fun plateau -> 
+	let graphe = construire_graphe plateau j in
 	plus_court_chemin graphe rive1 rive2
-
 
 let victoire_aux_B = victoire_aux B
 let victoire_aux_R = victoire_aux R
@@ -217,7 +236,7 @@ let coups_possibles  =
         let cases = List.init n (fun x -> List.init n (fun y -> (x,y))) |> List.concat in
 
         fun config -> 
-	if victoire_R config || victoire_B config then [] else
+	if victoire_R config.plateau || victoire_B config.plateau then [] else
 
 	let j = config.joueur in
 	cases
@@ -225,7 +244,7 @@ let coups_possibles  =
 	|> List.map (fun (x,y) -> 
 		let config = {
 			joueur = joueur_oppose j;
-			plateau = copie config.plateau
+			plateau = copie config.plateau (* ne pas recopier cette merde *)
 		} in
 		config.plateau.(x).(y) <- j;
 		(config, (x,y))
@@ -233,21 +252,22 @@ let coups_possibles  =
 
 (* Q7 *)
 let heuristique config = 
-	let n = Array.length config.plateau in
+        let l' = victoire_aux R config.plateau in
+	if l' = 0 then - 2*n*n else
 
-        let l' = victoire_aux R config in
-	if l' = 0 then - n*n else
+	let l = victoire_aux B config.plateau in
+        if l = 0 then 2*n*n else
 
-	let l = victoire_aux B config in
-        if l = 0 then n*n else
-
-        l*l - l'*l'
+        l'*l' - l*l
 
 (* Q6 *)
 
 (* prend en entree un coup et lui associe un interet: 0 si le coup est interessant, un entier strictement negatif sinon *)
 (* TODO: prebake avec la config en entree et def la liste des coups interessants *)
+(* TODO: test avec et sans pour voir si ca ameliore les perfs *)
 let interet (config: configuration) =
+        fun c -> 0
+        (*
         let plateau = config.plateau in
 
         fun (c: coup) ->
@@ -256,13 +276,13 @@ let interet (config: configuration) =
         (* on regarde si la distance minimale a une case deja remplie est inferieure ou egale a 2*)
         let (x,y) = c in
         
-        (* liste des cases à 2 d'ecart *)
-        [(1, 1); (2, 0); (2, -1); (2, -2); (1, 0); (1, -1); (1, -2); (0, 2); 
-         (0, 1); (0, -1); (0, -2); (-1, 2); (-1, 1); (-1, 0); (-1, -1); (-2, 2);
-         (-2, 1); (-2, 0)] (* TODO: optimiser l'ordre *)
+        (* liste des cases magiques (1 d'ecart / connexion) *)
+        [(1, 1); (2, -1); (1, 0); (1, -1); (1, -2); (0, 1); (0, -1); (-1, 2); (-1, 1); (-1, 0); (-1, -1); (-2, 1)] (* TODO: optimiser l'ordre *)
 	|> List.exists (fun (dx,dy) -> let x, y = x+dx, y + dy in dans_plateau (x,y) && plateau.(x).(y) <> V)
         |> function | true -> 0 | false -> -2
+        *)
 
+(* TODO: elagage alpha beta *)
 let rec construire_arbre config h coup =
         if h <= 0 then {config=config; coup=coup; enfants=[]; valeur = heuristique config }
 	else
@@ -278,7 +298,10 @@ let rec construire_arbre config h coup =
 
 	let enfants = List.map
 		(fun (config, coup) -> 
-                        let res = construire_arbre config (h-1 + interet config coup) (Some coup) in
+                        let i = interet config coup in
+                        let res = construire_arbre config (h-1+i) (Some coup) in
+                        (* diminue la valeur des coups ininteressants (3 = facteur arbitraire ) *)
+                        let res = {config=res.config;coup=res.coup;enfants=res.enfants; valeur = res.valeur + 100 * i } in
                         let () = if comp res.valeur !valeur then valeur := res.valeur in
                         res
 
@@ -286,7 +309,6 @@ let rec construire_arbre config h coup =
 		enfants in
 	
         {config=config; coup=coup; enfants=enfants; valeur=(!valeur)}
-
 
 (* Q9 *)
 let rec trouver_coup arbre =
@@ -305,7 +327,7 @@ let minmax (config: configuration) (h: int) =
         trouver_coup (construire_arbre config h None)
 
 (* Q99 *)
-let choisir_coup config = minmax config 1
+let choisir_coup config = minmax config 2
 
 (* PARTIE --------------------------------------------------------------------------------------------------------------------------------------------- *)
 
@@ -336,9 +358,9 @@ let jouer_coup config joueur (i,j) =
 let rec jeu config =
 	print_config config;
 
-	if victoire_R config then
+	if victoire_R config.plateau then
 		Printf.printf "Vous (R) avez gagné !\n"
-	else if victoire_B config then
+	else if victoire_B config.plateau then
 		Printf.printf "L'IA (B) a gagné !\n"
 	else if config.joueur = R then begin
 		(* Tour humain *)
@@ -357,7 +379,6 @@ let rec jeu config =
 let () =
         if input_line stdin = "" then () else begin
 
-        let n = 11 in  (* taille du plateau *)
         let plateau_initial = Array.make_matrix n n V in
         let config_initial = { plateau = plateau_initial; joueur = R } in
         print_string "Debut de la partie\n\n";
@@ -390,8 +411,28 @@ let ec1 =
         }
 
 let ec2 =
-        let p = Array.make_matrix 9 9 V in 
+        let p = Array.make_matrix n n V in 
         {
                 plateau = p;
                 joueur = R;
+        }
+
+let ec3 =
+        let n = 11 in
+        let p = Array.make_matrix n n V in
+
+        p.(0).(8) <- R;
+        p.(1).(8) <- R;
+        p.(1).(9) <- R;
+        p.(2).(7) <- R;
+        p.(3).(6) <- R;
+        p.(4).(6) <- R;
+        p.(5).(6) <- R;
+        p.(6).(6) <- R;
+        p.(7).(6) <- R;
+        p.(8).(6) <- R;
+        p.(10).(4) <- R;
+        {
+                plateau = p;
+                joueur = B;
         }
