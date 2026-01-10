@@ -1,4 +1,10 @@
-let n = 11 (* hardcode pour des raisons de performance *)
+(* CONFIG *)
+let n = 11
+let p = 2
+
+
+
+
 
 let () = if n<4 then failwith "[ERREUR] Il faut n >= 4"
 
@@ -24,8 +30,7 @@ type graphe = {
 }
 
 type arbre_config = {
-        config : configuration;
-        coup : coup option;          (* None pour la racine *)
+        config : configuration; coup : coup option;          (* None pour la racine *)
         enfants : arbre_config list;
         valeur: int
 }
@@ -66,7 +71,6 @@ let print_config config =
         (match config.joueur with B -> "Bleu" | R -> "Rouge" | _ -> "?");
         print_string "\n"
 
-(* copie d'une matrice *)
 let copie t = 
 	let t2 = Array.make_matrix n n V in
 	for i = 0 to n-1 do
@@ -144,11 +148,21 @@ let plus_court_chemin g (depart: sommet list) (arrivee: sommet list) =
 	) arrivee;
 	!res
 
+let tour plateau =
+        let c = ref 0 in
+        for x=0 to n-1 do
+                for y=0 to n-1 do
+                        if plateau.(x).(y) <> V then incr c
+                done
+        done;
+        !c
+
 (* SUJET ---------------------------------------------------------------------------------------------------------------------------------------------- *)
 
 (* Q1 *)
 let dans_plateau ((x,y):sommet) =
         0<=x && x < n && y>=0 && y < n
+
 (* Q2 *)
 (* le poids dans le graphe du joueur j de l'arete entre les cases c1 et c2 *)
 let cout j (c: case) =
@@ -169,7 +183,7 @@ let liste_voisins j plateau ((x,y):sommet) : (sommet*int) list =
         end
 	|> List.filter (fun (_,cout) -> cout <> 2)
 
-(* ajoute les pseudo-sommets a la liste des voisins *)
+(* version modifiee de la fonction pour avoir les pseudo-sommets *)
 let liste_voisins j plateau =
         if j=B
         then
@@ -231,8 +245,7 @@ let victoire_B config = victoire_aux_B config = 0
 let victoire_R config = victoire_aux_R config = 0
 
 (* Q5 *)
-let coups_possibles  =
-        (* precalcule pour des raisons de performance *)
+let coups_possibles1  =
         let cases = List.init n (fun x -> List.init n (fun y -> (x,y))) |> List.concat in
 
         fun config -> 
@@ -244,11 +257,53 @@ let coups_possibles  =
 	|> List.map (fun (x,y) -> 
 		let config = {
 			joueur = joueur_oppose j;
-			plateau = copie config.plateau (* ne pas recopier cette merde *)
+			plateau = copie config.plateau
 		} in
 		config.plateau.(x).(y) <- j;
 		(config, (x,y))
 	)
+
+let coups_possibles2 config =
+        let matrix = Array.make_matrix n n false in
+
+        let plateau = config.plateau in
+        let j = config.joueur in
+        let j' = joueur_oppose j in
+
+        for i=0 to n-1 do
+                for j=0 to n-1 do
+                        if plateau.(i).(j) = V then () else
+                        [(1, 1); (2, -1); (1, 0); (1, -1); (1, -2); (0, 1); (0, -1); (-1, 2); (-1, 1); (-1, 0); (-1, -1); (-2, 1)]
+                        |> List.map (fun (dx,dy) -> (i+dx,j+dy))
+                        |> List.filter dans_plateau
+                        |> List.iter (fun (x,y) -> matrix.(x).(y) <- true)
+                done
+        done;
+        matrix.(n/2).(n/2) <- true;
+
+
+
+        let coups = ref [] in
+        for x = 0 to n-1 do
+                for y = 0 to n-1 do
+                        if plateau.(x).(y) <> V
+                        then ()
+
+                        else if matrix.(x).(y) then
+
+                        let config' = {
+                                joueur = j';
+                                plateau = copie plateau (* TODO: ne pas recopier *)
+                        } in
+                        let () = config'.plateau.(x).(y) <- j in
+                        coups := (config', (x,y)) :: !coups
+                done
+        done;
+        !coups
+
+let coups_possibles config = 
+        (* au debut on ne regarde que les cases proches *)
+        if tour config.plateau > 10 then coups_possibles1 config else coups_possibles2 config
 
 (* Q7 *)
 let heuristique config = 
@@ -258,76 +313,50 @@ let heuristique config =
 	let l = victoire_aux B config.plateau in
         if l = 0 then 2*n*n else
 
-        l'*l' - l*l
+        (n-l)*(n-l) - (n-l')*(n-l')
 
 (* Q6 *)
+exception Arret of (coup*int)
 
-(* prend en entree un coup et lui associe un interet: 0 si le coup est interessant, un entier strictement negatif sinon *)
-(* TODO: prebake avec la config en entree et def la liste des coups interessants *)
-(* TODO: test avec et sans pour voir si ca ameliore les perfs *)
-let interet (config: configuration) =
-        fun c -> 0
-        (*
-        let plateau = config.plateau in
-
-        fun (c: coup) ->
-        if c = (n/2,n/2) then 0 else (* prendre le centre *)
-
-        (* on regarde si la distance minimale a une case deja remplie est inferieure ou egale a 2*)
-        let (x,y) = c in
-        
-        (* liste des cases magiques (1 d'ecart / connexion) *)
-        [(1, 1); (2, -1); (1, 0); (1, -1); (1, -2); (0, 1); (0, -1); (-1, 2); (-1, 1); (-1, 0); (-1, -1); (-2, 1)] (* TODO: optimiser l'ordre *)
-	|> List.exists (fun (dx,dy) -> let x, y = x+dx, y + dy in dans_plateau (x,y) && plateau.(x).(y) <> V)
-        |> function | true -> 0 | false -> -2
-        *)
-
-(* TODO: elagage alpha beta *)
-let rec construire_arbre config h coup =
-        if h <= 0 then {config=config; coup=coup; enfants=[]; valeur = heuristique config }
+let rec construire_arbre config h coup aux : (coup*int) = (* aux: variable d'elagage *)
+        if h <= 0 then ((-1,-1), heuristique config)
 	else
 
-        let valeur,comp =
+        let m,comp =
                 if config.joueur = B
                 then ref (-infinity), (>)
                 else ref (+infinity), (<)
         in
+        let best = ref (-1,-1) in
 
-	let enfants = coups_possibles config in
+        let enfants = coups_possibles config in
+        try
+                List.iter
+                (fun (config, c') -> 
+                        let (_,v) = construire_arbre config (h-1) c' (!m) in
+                        if comp v !m then begin
+                                if comp v aux then raise (Arret (c', v)); (* elagage *)
+                                m := v;
+                                best := c'
+                        end
+                )
+                enfants;
 
-
-	let enfants = List.map
-		(fun (config, coup) -> 
-                        let i = interet config coup in
-                        let res = construire_arbre config (h-1+i) (Some coup) in
-                        (* diminue la valeur des coups ininteressants (3 = facteur arbitraire ) *)
-                        let res = {config=res.config;coup=res.coup;enfants=res.enfants; valeur = res.valeur + 100 * i } in
-                        let () = if comp res.valeur !valeur then valeur := res.valeur in
-                        res
-
-		)
-		enfants in
-	
-        {config=config; coup=coup; enfants=enfants; valeur=(!valeur)}
-
-(* Q9 *)
-let rec trouver_coup arbre =
-        let enfants = arbre.enfants |> List.map
-                (fun arbre -> let {coup;valeur}=arbre in match coup with | None -> failwith "[ERREUR] aaaa pas de coup" | Some coup -> (coup, valeur))
-        in
-        let c,_ = List.fold_left
-                (fun (c,v) (c',v') -> if v>=v' then (c,v) else (c',v'))
-                ( (-1,-1), -9999999)
-                enfants
-        in
-        c
+                (!best,!m)
+        with
+                | Arret (c,v) -> (c,v)
 
 (* Q10 *)
 let minmax (config: configuration) (h: int) =
-        trouver_coup (construire_arbre config h None)
+        if config.joueur = R then failwith "[ERREUR] l'algo ne peut jouer que le joueur bleu";
+        let (c,_) = construire_arbre config h (-1,-1) (+infinity)
+        in c
 
 (* Q99 *)
-let choisir_coup config = minmax config 2
+let choisir_coup config =
+        match minmax config p with
+        | (-1,-1) -> minmax config 2 (* si l'algo renvoie (-1,-1) l'ennemi peut garantir sa win, alors on reduit la prof pour l'ignorer *)
+        | x -> x
 
 (* PARTIE --------------------------------------------------------------------------------------------------------------------------------------------- *)
 
@@ -369,7 +398,6 @@ let rec jeu config =
 		jeu config
 	end else begin
 		(* Tour IA *)
-		Printf.printf "L'IA réfléchit...\n";
 		let c = choisir_coup config in
 		Printf.printf "L'IA joue %d %d\n" (fst c) (snd c);
 		let config = jouer_coup config B c in
@@ -377,7 +405,8 @@ let rec jeu config =
 	end
 
 let () =
-        if input_line stdin = "" then () else begin
+        let choix = input_line stdin in
+        if choix = "" then () else begin
 
         let plateau_initial = Array.make_matrix n n V in
         let config_initial = { plateau = plateau_initial; joueur = R } in
@@ -432,6 +461,30 @@ let ec3 =
         p.(7).(6) <- R;
         p.(8).(6) <- R;
         p.(10).(4) <- R;
+        {
+                plateau = p;
+                joueur = B;
+        }
+
+let ec4 =
+        let n = 5 in
+        let p = Array.make_matrix n n V in
+
+        p.(0).(0) <- R;
+        p.(0).(3) <- R;
+        p.(0).(4) <- B;
+        p.(1).(0) <- R;
+        p.(1).(1) <- B;
+        p.(1).(2) <- B;
+        p.(1).(3) <- R;
+        p.(2).(0) <- B;
+        p.(2).(1) <- R;
+        p.(2).(2) <- B;
+        p.(2).(3) <- R;
+        p.(2).(4) <- R;
+        p.(3).(2) <- B;
+        p.(3).(4) <- R;
+        p.(4).(2) <- B;
         {
                 plateau = p;
                 joueur = B;
